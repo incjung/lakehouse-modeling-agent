@@ -14,7 +14,7 @@
 | `scripts/generate_mermaid.py` | Mermaid 데이터 계보 다이어그램 생성 | Phase 4 |
 | `scripts/generate_mock_data.py` | 스키마 기반 가상 데이터 미리보기 생성 | Phase 4 |
 | `scripts/sandbox_validate.py` | DuckDB 샌드박스 환경에서 DDL/SQL 검증 | Phase 5 |
-| `scripts/generate_artifacts.py` | Iceberg DDL + PySpark ETL 코드 생성 | Phase 6 |
+| `scripts/generate_artifacts.py` | Iceberg DDL + PySpark ETL + 사용자 가이드 코드 생성 | Phase 6 |
 
 ## 워크플로우 (6단계 순환)
 
@@ -200,10 +200,11 @@
    - `output/ddl/` : Iceberg CREATE TABLE 문 (파티션, 정렬 포함)
    - `output/etl/` : PySpark ETL/ELT 스크립트
    - `output/ops/` : Compaction, Snapshot 관리, Z-Order 최적화 스크립트
-   - `output/docs/` : 테이블/컬럼 메타데이터 문서
+   - `output/docs/` : 사용자 가이드 (엔진 호환성, 주의사항) + 테이블/컬럼 메타데이터 문서
 3. 사용자에게 최종 검토 요청:
    - 보안 정책 적합성
    - 인프라 설정 호환성
+   - 쿼리 엔진 호환성 (Spark / Trino 문법 차이 안내)
 
 ## 핵심 체크리스트
 
@@ -213,6 +214,7 @@
 - [ ] **Strategic Choice**: MOR/COW 전략이 적절히 선택되었는가?
 - [ ] **User Approval**: 파티션 설계 및 보관 주기를 사용자가 명시적으로 승인했는가?
 - [ ] **Sandbox Verified**: DuckDB에서 로직 정합성 테스트를 통과했는가?
+- [ ] **Engine Compatibility**: 쿼리 엔진별 호환성(Spark/Trino DDL·SQL 차이)이 사용자 가이드에 포함되었는가?
 - [ ] **Operational Ready**: 메인터넌스 가이드와 최적화 스크립트가 포함되었는가?
 - [ ] **Visibility**: 모든 과정의 로그가 사용자에게 노출되었는가?
 
