@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.agent_venv/
+.venv/
+venv/
+
+# DuckDB temp
+*.duckdb
+*.duckdb.wal
+
+# Output artifacts (regeneratable)
+output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Profile/validation results (regeneratable)
+profile_report.json
+validation_report.json
+lineage.md
+mock_preview.csv

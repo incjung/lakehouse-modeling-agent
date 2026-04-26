@@ -1,0 +1,105 @@
+{
+  "business_context": "제조 공정 품질 모니터링 — 라인별/제품별 불량률 추이 분석",
+  "freshness": "daily",
+  "kpis": [
+    {"name": "defect_rate", "formula": "defect_count / total_count * 100", "unit": "%"},
+    {"name": "yield_rate", "formula": "(total_count - defect_count) / total_count * 100", "unit": "%"},
+    {"name": "line_uptime", "formula": "active_minutes / total_minutes * 100", "unit": "%"}
+  ],
+  "dimensions": ["production_line", "product_model", "shift", "date"],
+
+  "sources": [
+    {
+      "name": "mes_production_log",
+      "origin": "MES",
+      "load_method": "CDC",
+      "update_frequency": "per_second",
+      "columns": [
+        {"name": "event_id", "type": "BIGINT", "nullable": false, "description": "이벤트 고유 ID"},
+        {"name": "event_ts", "type": "TIMESTAMP", "nullable": false, "description": "이벤트 발생 시각"},
+        {"name": "line_id", "type": "STRING", "nullable": false, "description": "생산라인 ID"},
+        {"name": "product_id", "type": "STRING", "nullable": false, "description": "제품 ID"},
+        {"name": "status", "type": "STRING", "nullable": false, "description": "생산 상태 (PASS/FAIL)"},
+        {"name": "operator_id", "type": "STRING", "nullable": true, "description": "작업자 ID"}
+      ]
+    },
+    {
+      "name": "erp_product_master",
+      "origin": "ERP",
+      "load_method": "Batch",
+      "update_frequency": "daily",
+      "columns": [
+        {"name": "product_id", "type": "STRING", "nullable": false, "description": "제품 ID"},
+        {"name": "product_name", "type": "STRING", "nullable": false, "description": "제품명"},
+        {"name": "model_code", "type": "STRING", "nullable": false, "description": "모델 코드"},
+        {"name": "category", "type": "STRING", "nullable": true, "description": "제품 카테고리"}
+      ]
+    }
+  ],
+
+  "tables": [
+    {
+      "name": "silver_production_events",
+      "layer": "silver",
+      "mode": "MOR",
+      "description": "정제된 생산 이벤트 (중복 제거, 타입 정규화)",
+      "columns": [
+        {"name": "event_id", "type": "BIGINT", "nullable": false, "description": "이벤트 고유 ID"},
+        {"name": "event_ts", "type": "TIMESTAMP", "nullable": false, "description": "이벤트 발생 시각"},
+        {"name": "line_id", "type": "STRING", "nullable": false, "description": "생산라인 ID"},
+        {"name": "product_id", "type": "STRING", "nullable": false, "description": "제품 ID"},
+        {"name": "model_code", "type": "STRING", "nullable": false, "description": "모델 코드 (ERP JOIN)"},
+        {"name": "status", "type": "STRING", "nullable": false, "description": "생산 상태"},
+        {"name": "is_defect", "type": "BOOLEAN", "nullable": false, "description": "불량 여부"},
+        {"name": "operator_id", "type": "STRING", "nullable": true, "description": "작업자 ID"}
+      ],
+      "partition_spec": [
+        {"column": "event_ts", "transform": "days", "reason": "일별 쿼리 패턴 지원"}
+      ],
+      "sort_order": ["line_id", "product_id"],
+      "retention_days": 365,
+      "compaction_schedule": "weekly"
+    }
+  ],
+
+  "gold_tables": [
+    {
+      "name": "gold_production_quality",
+      "layer": "gold",
+      "mode": "COW",
+      "description": "일별 라인별 생산 품질 KPI 집계 테이블",
+      "columns": [
+        {"name": "production_date", "type": "DATE", "nullable": false, "description": "생산일자"},
+        {"name": "line_id", "type": "STRING", "nullable": false, "description": "생산라인 ID"},
+        {"name": "model_code", "type": "STRING", "nullable": false, "description": "모델 코드"},
+        {"name": "shift", "type": "STRING", "nullable": false, "description": "근무조 (DAY/NIGHT/SWING)"},
+        {"name": "total_count", "type": "INT", "nullable": false, "description": "총 생산 수량"},
+        {"name": "defect_count", "type": "INT", "nullable": false, "description": "불량 수량"},
+        {"name": "defect_rate", "type": "DOUBLE", "nullable": false, "description": "불량률 (%)"},
+        {"name": "yield_rate", "type": "DOUBLE", "nullable": false, "description": "수율 (%)"}
+      ],
+      "partition_spec": [
+        {"column": "production_date", "transform": "months", "reason": "월별 리포팅 패턴"}
+      ],
+      "sort_order": ["line_id"],
+      "retention_days": 1825,
+      "primary_query_patterns": ["시계열 추이 분석", "라인별 드릴다운", "모델별 비교"]
+    }
+  ],
+
+  "lineage": [
+    {"from": "mes_production_log", "to": "silver_production_events", "transform": "CDC + Dedup"},
+    {"from": "erp_product_master", "to": "silver_production_events", "transform": "JOIN(product_id)"},
+    {"from": "silver_production_events", "to": "gold_production_quality", "transform": "GROUP BY + AGG"}
+  ],
+
+  "column_mappings": [
+    {"source_table": "mes_production_log", "source_column": "event_ts", "transform": "TO_DATE(event_ts)", "target_table": "gold_production_quality", "target_column": "production_date", "type": "DATE"},
+    {"source_table": "mes_production_log", "source_column": "line_id", "transform": "direct", "target_table": "gold_production_quality", "target_column": "line_id", "type": "STRING"},
+    {"source_table": "erp_product_master", "source_column": "model_code", "transform": "JOIN via product_id", "target_table": "gold_production_quality", "target_column": "model_code", "type": "STRING"},
+    {"source_table": "mes_production_log", "source_column": "status", "transform": "CASE WHEN status='FAIL' THEN 1 ELSE 0", "target_table": "silver_production_events", "target_column": "is_defect", "type": "BOOLEAN"},
+    {"source_table": "silver_production_events", "source_column": "is_defect", "transform": "SUM(CASE WHEN is_defect THEN 1) / COUNT(*) * 100", "target_table": "gold_production_quality", "target_column": "defect_rate", "type": "DOUBLE"}
+  ],
+
+  "user_approved": false
+}
