@@ -41,3 +41,6 @@ design_config.json
 
 # Temporary archives
 archive/
+
+# Test fixtures (regeneratable)
+input/
