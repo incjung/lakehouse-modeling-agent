@@ -15,7 +15,7 @@ Apache Iceberg 기반 데이터 레이크하우스의 **하향식(Top-Down) 모�
 lakehouse-modeling-agent/
 ├── .pi/
 │   ├── prompts/
-│   │   └── lh-start.md              # 오케스트레이터 (워크플로우 + 대화 규칙)
+│   │   └── dataLake-modeling.md     # 오케스트레이터 (워크플로우 + 대화 규칙)
 │   └── skills/
 │       ├── lakehouse-design/
 │       │   ├── SKILL.md             # 포맷 무관 실행 (Phase 1~5 DuckDB)
@@ -48,14 +48,15 @@ lakehouse-modeling-agent/
 ## 워크플로우 (2-Layer)
 
 ```
-Prompt Template (.pi/prompts/lh-start.md)
+Prompt Template (.pi/prompts/dataLake-modeling.md)
   └── 오케스트레이터: 대화 규칙 + 승인 게이트 + 스킬 선언
 
+  Phase 1: 비즈니스 파악 (스킬 없이 대화만)
+  Phase 2: 소스 프로파일링
+  Phase 3a: 추상 전략 합의 (스킬 없이 대화만)
        ┌─────────────────────────────────────────────────┐
        │           lakehouse-design 스킬                 │
-       │  Phase 1: 비즈니스 파악 (대화)                  │
        │  Phase 2: 소스 프로파일링                       │
-       │  Phase 3a: 추상 전략 합의 (대화)                │
        │  Phase 4: 시각화 + 용어 사전                    │
        │  Phase 5: DuckDB 논리 검증 → 🟦 인증서         │
        └──────────────── 포맷 선택 게이트 ───────────────┘
@@ -64,7 +65,7 @@ Prompt Template (.pi/prompts/lh-start.md)
        │          lakehouse-iceberg 스킬                 │
        │  Phase 3b: MOR/COW + 파티션 transform 결정      │
        │  Phase 5: Spark 검증 스크립트 생성 → 🟧 체크리스트│
-       │  Phase 6: DDL + ETL + 운영 스크립트 생성        │
+       │  Phase 6: DDL + Spark SQL + 운영 스크립트 생성  │
        └─────────────────────────────────────────────────┘
 ```
 
@@ -82,7 +83,7 @@ source .venv/bin/activate
 ### 2. pi에서 시작
 
 ```
-/lh-start
+/dataLake-modeling
 ```
 
 pi가 `business_model.json` 존재 여부를 자동 감지하여 CREATE / ALTER 모드로 진입합니다.
@@ -123,7 +124,8 @@ python scripts/generate_artifacts.py --config design_config.json --output-dir ./
 | `output/docs/term_glossary.md` | 비즈니스 용어 사전 | Phase 4 |
 | `output/validation/` | Spark 검증 스크립트 | Phase 5 |
 | `output/ddl/` | Iceberg DDL | Phase 6 |
-| `output/etl/` | PySpark ETL | Phase 6 |
+| `output/sql/` | Spark SQL (MERGE INTO / INSERT / 집계) | Phase 6 |
+| `output/etl/run_etl.py` | 얇은 Python 래퍼 (watermark + SQL 실행) | Phase 6 |
 | `output/ops/` | 운영 스크립트 | Phase 6 |
 
 ## 새 포맷 추가 방법
