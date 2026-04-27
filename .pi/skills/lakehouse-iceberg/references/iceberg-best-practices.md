@@ -80,25 +80,65 @@ SELECT * FROM table.partitions;
 
 ## 스냅샷 관리
 
+### 스냅샷 목록 확인
+
 ```sql
--- 만료된 스냅샷 제거 (보관 주기 설정)
-CALL catalog.expire_snapshots(
-  'lakehouse.table_name',
-  TIMESTAMP '2026-01-01 00:00:00'
-);
-
--- 롤백 (장애 시 복구)
-CALL catalog.rollback_to_snapshot(
-  'lakehouse.table_name',
-  <snapshot_id>
-);
-
--- 스냅샷 목록 확인
 SELECT snapshot_id, committed_at, operation
 FROM lakehouse.table_name.snapshots
 ORDER BY committed_at DESC
 LIMIT 10;
 ```
+
+### 패턴 1 — 특정 시간 이전 삭제 (권장)
+
+현재 시점으로부터 특정 시간보다 오래된 스냅샷을 정리합니다.
+`retain_last` 는 **필수 안전장치** — 없으면 타임트래블 포인트가 전부 사라질 수 있습니다.
+
+```sql
+CALL catalog.system.expire_snapshots(
+    table        => 'lakehouse.table_name',
+    older_than   => TIMESTAMP '2026-04-01 00:00:00', -- 이 시간 이전 것은 삭제
+    retain_last  => 100                              -- 하지만 최신 100개는 무조건 보관
+);
+```
+
+### 패턴 2 — 개수 기준 보관 (시간 무관)
+
+날짜와 관계없이 최근 N개의 스냅샷만 유지합니다.
+배치가 불규칙하거나 보관 기간보다 보관 개수가 더 중요한 경우에 적합합니다.
+
+```sql
+CALL catalog.system.expire_snapshots(
+    table        => 'lakehouse.table_name',
+    older_than   => now(),   -- 현재 시점 이전 전부 대상
+    retain_last  => 30       -- 최신 30개만 보관
+);
+```
+
+### 패턴 3 — 롤백 (장애 시 복구)
+
+```sql
+-- 1. 롤백 전 스냅샷 목록 확인
+SELECT snapshot_id, committed_at, operation
+FROM lakehouse.table_name.snapshots
+ORDER BY committed_at DESC LIMIT 10;
+
+-- 2. 특정 스냅샷으로 롤백
+CALL catalog.rollback_to_snapshot(
+    'lakehouse.table_name',
+    <snapshot_id>
+);
+```
+
+### 레이어별 권장 설정
+
+| 레이어 | older_than | retain_last | 실행 주기 | 근거 |
+|---|---|---|---|---|
+| **Silver** (MOR) | 30일 | 100 | 주 1회 | 잦은 UPSERT → 스냅샷 빠르게 누적 |
+| **Gold** (COW) | 90일 | 50 | 월 1회 | 쓰기 빈도 낮음, 타임트래블 길게 보존 |
+
+> ⚠️ `retain_last` 를 생략하면 `older_than` 기준으로 **모든 스냅샷이 삭제될 수 있습니다.**
+> 반드시 두 파라미터를 함께 사용하세요.
 
 ## Compaction 전략
 
