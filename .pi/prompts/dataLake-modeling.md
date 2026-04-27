@@ -48,6 +48,10 @@ Mix languages only if the user does so first.
 - **핵심 KPI 산식** → SQL 레벨로 번역 → 사용자 재확인
 - **비즈니스 용어 ↔ 데이터 컬럼 매핑** (확인 전까지 절대 가정 금지)
 - **데이터 신선도 요구사항** (실시간 / 일배치 / 주배치)
+- **소스별 변경 패턴** (각 소스 테이블마다 반드시 확인)
+  - 데이터가 추가만 되나요, 수정/삭제도 되나요? (Append-only / Mutable)
+  - 변경 감지 컬럼(`updated_at` 등)이 소스에 있나요?
+  - 변경 이력을 전부 보관해야 하나요, 최신만 유지하면 되나요? (SCD Type1 / Type2)
 - **엣지 케이스 선제 발굴** (날짜 경계, 지연 데이터, 코드값 의미)
 
 소스가 여러 개일 경우:
@@ -76,6 +80,8 @@ python scripts/profile_source.py --input <파일경로> --sample 10000  # 대용
 - NULL 비율이 높은 컬럼 → Gold 포함 여부 결정
 - 중복 행 발견 → 중복 제거 기준 키 확인
 - JOIN 키 불일치 발견 → 처리 방침 결정
+- **TIMESTAMP_CANDIDATE 컬럼 발견 시** → "이 컬럼이 증분 적재 기준(Watermark)인가요?" 반드시 질문
+- **Phase 1에서 변경 패턴을 확인하지 못한 경우** → 이 단계에서 소스별 Append-only / Mutable 여부 재확인
 
 ---
 
@@ -89,6 +95,12 @@ python scripts/profile_source.py --input <파일경로> --sample 10000  # 대용
 | read_pattern | range_scan / point_lookup / full_scan |
 | retention_days | 숫자로 명시 |
 | query_focus | 주요 필터·정렬 컬럼 목록 |
+| **load_pattern** | **full_refresh / append / upsert / scd2** (테이블별로 결정) |
+| **watermark_column** | **증분 기준 컬럼명 또는 없음** |
+| **etl_dialect** | **spark_sql** (권장) / pyspark |
+| **merge_key** | 테이블별 PK 컬럼명 (upsert 시 반드시 확정) |
+| **gold_refresh** | **full_recompute** / **incremental** (전날만) |
+| **watermark_store** | **file** / db_table / airflow_variable |
 
 완료 후 합의 내용을 표로 정리해서 보여준다.
 
@@ -190,7 +202,7 @@ python scripts/merge_configs.py \
   --input business_model.json \
   --output design_config.json
 
-# Step 2: DDL + ETL + 운영 스크립트 + 용어 사전 생성
+# Step 2: DDL + Spark SQL ETL + 운영 스크립트 + 용어 사전 생성
 python scripts/generate_artifacts.py \
   --config design_config.json \
   --output-dir ./output \
@@ -200,6 +212,22 @@ python scripts/generate_term_glossary.py \
   --input business_model.json \
   --output output/docs/term_glossary.md
 ```
+
+생성 산출물 구조:
+```
+output/
+├── ddl/   → Iceberg CREATE TABLE DDL
+├── sql/   → 완성된 Spark SQL (MERGE INTO / INSERT / 집계)
+│   ├── insert_<table>.sql      → append 패턴
+│   ├── upsert_<table>.sql      → MERGE INTO (upsert 패턴)
+│   └── aggregate_<table>.sql   → Gold 집계
+├── etl/
+│   └── run_etl.py             → 얇은 Python 래퍼 (SparkSession + watermark + SQL 실행)
+├── ops/   → Compaction · 스냅샷 관리
+└── docs/  → user_guide.md · term_glossary.md
+```
+
+⚠️ `{last_watermark}`, `{target_date}` 는 `python.format()` 으로 치환됨 — `run_etl.py` 에서 자동 처리
 
 최종 확인:
 - 보안 정책 적합성 (민감 컬럼 마스킹 필요 여부)

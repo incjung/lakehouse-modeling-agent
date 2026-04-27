@@ -38,3 +38,6 @@ sample_data/
 # Generated configs (regeneratable)
 business_model.json
 design_config.json
+
+# Temporary archives
+archive/

@@ -88,8 +88,13 @@ output/
 ├── ddl/
 │   ├── <table_name>.sql          → Iceberg CREATE/ALTER TABLE
 │   └── all_tables.sql            → 전체 통합
+├── sql/
+│   ├── insert_<table>.sql        → Spark SQL INSERT (append 패턴)
+│   ├── upsert_<table>.sql        → Spark SQL MERGE INTO (upsert 패턴)
+│   └── aggregate_<table>.sql     → Spark SQL 집계 (gold 패턴)
 ├── etl/
-│   └── etl_<table_name>.py       → PySpark ETL (extract/transform/load)
+│   └── run_etl.py                → 얇은 Python 래퍼
+│                                    (SparkSession + watermark 관리 + SQL 파일 실행)
 ├── ops/
 │   ├── compaction.sql            → 정기 Compaction
 │   ├── snapshot_management.sql   → 스냅샷 만료 관리
@@ -102,6 +107,11 @@ output/
     ├── term_glossary.md          → 비즈니스 용어 사전
     └── table_metadata.json       → 테이블·컬럼 메타데이터
 ```
+
+Spark SQL 파라미터 치환 방식: `python.format()`
+- `{last_watermark}` → watermark.json 에서 읽음
+- `{target_date}`    → 전날 날짜 (`date.today() - timedelta(1)`)
+- `{namespace}`     → 실행 시 주입
 
 ---
 
