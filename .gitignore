@@ -34,3 +34,7 @@ validation_report.json
 lineage.md
 mock_preview.csv
 sample_data/
+
+# Generated configs (regeneratable)
+business_model.json
+design_config.json

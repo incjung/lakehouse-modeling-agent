@@ -5,10 +5,28 @@
 """
 
 import argparse
+import importlib.util
 import json
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# ── venv 강제 실행 가드 ────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from venv_guard import ensure_venv
+ensure_venv()
+# ──────────────────────────────────────────────────────────
+
+
+def _load_mermaid_builder():
+    """generate_mermaid.py의 build_mermaid 함수를 동적으로 로드"""
+    mermaid_path = Path(__file__).resolve().parent / "generate_mermaid.py"
+    if not mermaid_path.exists():
+        return None
+    spec = importlib.util.spec_from_file_location("generate_mermaid", mermaid_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.build_mermaid
 
 
 def generate_iceberg_ddl(table: dict, namespace: str = "lakehouse") -> str:
@@ -796,12 +814,25 @@ def main():
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  ✅ META: {meta_path}")
 
+    # 6. Data Lineage 다이어그램 (generate_mermaid.py 재사용)
+    build_mermaid = _load_mermaid_builder()
+    if build_mermaid:
+        try:
+            lineage_md = build_mermaid(config)
+            lineage_path = out_dir / "docs" / "lineage.md"
+            lineage_path.write_text(lineage_md, encoding="utf-8")
+            print(f"  ✅ LINEAGE: {lineage_path}")
+        except Exception as e:
+            print(f"  ⚠️  LINEAGE 생성 실패 (건너뜀): {e}")
+    else:
+        print(f"  ⚠️  generate_mermaid.py 를 찾을 수 없어 lineage.md 생략")
+
     print(f"\n{'='*60}")
     print(f"🎉 아티팩트 생성 완료: {out_dir}")
     print(f"   ddl/  — Iceberg DDL 문 ({len(all_tables) + 1} 파일)")
     print(f"   etl/  — PySpark ETL 스크립트 ({len(all_tables)} 파일)")
     print(f"   ops/  — 운영 가이드")
-    print(f"   docs/ — 사용자 가이드 + 테이블 메타데이터")
+    print(f"   docs/ — 사용자 가이드 + 테이블 메타데이터 + lineage 다이어그램")
     print(f"{'='*60}")
 
 

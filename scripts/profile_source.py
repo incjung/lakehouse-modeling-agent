@@ -9,6 +9,12 @@ import json
 import sys
 from pathlib import Path
 
+# ── venv 강제 실행 가드 ────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from venv_guard import ensure_venv
+ensure_venv()
+# ──────────────────────────────────────────────────────────
+
 try:
     import pandas as pd
 except ImportError:

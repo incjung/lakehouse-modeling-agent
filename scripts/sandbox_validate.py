@@ -12,6 +12,12 @@ import textwrap
 import traceback
 from pathlib import Path
 
+# ── venv 강제 실행 가드 ────────────────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from venv_guard import ensure_venv
+ensure_venv()
+# ──────────────────────────────────────────────────────────
+
 try:
     import duckdb
 except ImportError:
@@ -226,8 +232,20 @@ def main():
     print("🧪 DuckDB 샌드박스 검증 시작")
     print("=" * 60)
 
-    # 모든 테이블 생성 및 데이터 주입
-    all_tables = config.get("tables", []) + config.get("gold_tables", [])
+    # 모든 테이블 생성 및 데이터 주입 (컬럼 없는 항목 및 중복 제거)
+    seen = set()
+    all_tables = []
+    for t in config.get("tables", []) + config.get("gold_tables", []):
+        name = t.get("name", "")
+        has_columns = len(t.get("columns", [])) > 0
+        if name in seen:
+            print(f"  ⚠️  중복 테이블 건너뜀: {name}")
+            continue
+        if not has_columns:
+            print(f"  ⚠️  컬럼 없는 테이블 건너뜀: {name}")
+            continue
+        seen.add(name)
+        all_tables.append(t)
 
     for table in all_tables:
         print(f"\n--- {table['name']} ---")
