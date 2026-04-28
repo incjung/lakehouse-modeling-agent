@@ -25,6 +25,65 @@ TBLPROPERTIES (
 )
 ```
 
+## 증분 쿼리 구현 패턴 (Incremental Query Patterns)
+Iceberg의 증분 읽기는 전체 데이터를 스캔하지 않고 스냅샷 간의 차이($\Delta$)만 읽어 처리 효율을 극대화합니다. 실버(Silver) 및 골드(Gold) 레이어 적재 시 다음 패턴을 적용합니다.
+### 증분 처리 시 고려사항 (Critical Considerations)
+- Idempotency (멱등성): 증분 쿼리는 여러 번 실행해도 결과가 같아야 합니다. MERGE INTO 사용 시 target.event_ts < source.event_ts 조건을 추가하여 뒤늦게 도착한 과거 데이터가 최신 데이터를 덮어쓰지 않도록 방어해야 합니다.
+- Snapshot Validity: start-snapshot-id가 expire_snapshots에 의해 이미 삭제된 경우 쿼리가 실패합니다. 반드시 증분 배치 주기 < 스냅샷 보존 기간이 유지되도록 설정하십시오.
+- Schema Evolution: Iceberg는 스키마 변경을 완벽히 지원하지만, 증분 읽기 도중 원천 테이블의 컬럼이 삭제되거나 타입이 변경된 경우 타겟 테이블과의 매핑 로직을 사전에 점검해야 합니다.
+### Spark DataFrame API 패턴
+데이터 엔지니어링 파이프라인에서 가장 권장되는 방식입니다. start-snapshot-id를 명시하여 지난 배치 이후의 데이터만 추출합니다.
+
+```python
+# 1. 체크포인트 테이블에서 마지막 처리된 스냅샷 ID 조회
+last_id = spark.sql("SELECT last_snapshot_id FROM audit.checkpoints WHERE table='bronze_logs'").collect()[0][0]
+
+# 2. 증분 데이터 읽기 (last_id 이후부터 현재 최신 스냅샷까지)
+incremental_df = spark.read \
+    .format("iceberg") \
+    .option("start-snapshot-id", last_id) \
+    .load("prod.db.bronze_logs")
+
+# 3. 읽어온 데이터가 있을 경우에만 MERGE 실행
+if not incremental_df.isEmpty():
+    incremental_df.createOrReplaceTempView("inc_source")
+    
+    # MERGE INTO 실행 (Deduplication 로직 포함)
+    spark.sql("""
+        MERGE INTO prod.db.silver_logs AS target
+        USING (
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER(PARTITION BY id ORDER BY event_ts DESC) as rn
+                FROM inc_source
+            ) WHERE rn = 1
+        ) AS source
+        ON target.id = source.id
+        WHEN MATCHED AND target.event_ts < source.event_ts THEN
+            UPDATE SET *
+        WHEN NOT MATCHED THEN
+            INSERT *
+    """)
+    
+    # 4. 체크포인트 업데이트 (현재 테이블의 최신 스냅샷 ID로)
+    new_last_id = spark.sql("SELECT snapshot_id FROM prod.db.bronze_logs.snapshots ORDER BY committed_at DESC LIMIT 1").collect()[0][0]
+    spark.sql(f"UPDATE audit.checkpoints SET last_snapshot_id = '{new_last_id}' WHERE table='bronze_logs'")
+```
+
+### Spark SQL 함수 패턴 (Table-Valued Function)
+Ad-hoc 분석이나 단순 SQL 기반 ETL에서 유용하게 사용되는 방식입니다.
+```sql
+-- 두 스냅샷 사이의 변경분 조회
+SELECT * FROM system.incremental_scan('prod.db.bronze_logs', 'from_snapshot_id', 'to_snapshot_id');
+
+-- 실무 활용 예시 (지난 1시간 내 추가된 데이터 확인)
+SELECT * FROM system.incremental_scan(
+    'prod.db.bronze_logs', 
+    (SELECT snapshot_id FROM prod.db.bronze_logs.snapshots WHERE committed_at < (NOW() - INTERVAL 1 HOUR) ORDER BY committed_at DESC LIMIT 1)
+);
+```
+
+
+
 ## 파티션 Transform 선택 가이드
 
 | Transform | 사용 케이스 | 예시 |
